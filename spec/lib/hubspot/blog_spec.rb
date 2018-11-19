@@ -1,15 +1,6 @@
 require 'timecop'
 
 describe Hubspot do
-  let(:example_blog_hash) do
-    VCR.use_cassette("blog_list", record: :none) do
-      url = Hubspot::Connection.send(:generate_url, Hubspot::Blog::BLOG_LIST_PATH)
-      resp = HTTParty.get(url, format: :json)
-      resp.parsed_response["objects"].first
-    end
-  end
-  let(:created_range_params) { { created__gt: false, created__range: (Time.now..Time.now + 2.years)  } }
-
   before do
     Hubspot.configure(hapikey: "demo")
     Timecop.freeze(Time.utc(2012, 'Oct', 10))
@@ -20,29 +11,49 @@ describe Hubspot do
   end
 
   describe Hubspot::Blog do
-
     describe ".list" do
-      cassette "blog_list"
-      let(:blog_list) { Hubspot::Blog.list }
+      it "returns a list of blogs" do
+        VCR.use_cassette("blog_list", record: :none) do
+          result = Hubspot::Blog.list
 
-      it "should have a list of blogs" do
-        blog_list.count.should be(1)
+          assert_requested :get, hubspot_api_url("/content/api/v2/blogs?hapikey=demo")
+          expect(result).to be_kind_of(Array)
+          expect(result.first).to be_a(Hubspot::Blog)
+        end
       end
     end
 
     describe ".find_by_id" do
-      cassette "blog_list"
+      it "retrieves a blog by id" do
+        VCR.use_cassette("blog_list", record: :none) do
+          id = 351076997
+          result = Hubspot::Blog.find_by_id(id)
 
-      it "should have a list of blogs" do
-        blog = Hubspot::Blog.find_by_id(351076997)
-        blog["id"].should eq(351076997)
+          assert_requested :get, hubspot_api_url("/content/api/v2/blogs/#{id}?hapikey=demo")
+          expect(result).to be_a(Hubspot::Blog)
+        end
       end
     end
 
-    describe "#initialize" do
-      subject{ Hubspot::Blog.new(example_blog_hash) }
-      its(["name"]) { should == "API Demonstration Blog" }
-      its(["id"])   { should == 351076997 }
+    describe "#[]" do
+      it "returns the value for the given key" do
+        data = {
+          "id" => 123,
+          "name" => "Demo",
+        }
+        blog = Hubspot::Blog.new(data)
+
+        expect(blog["id"]).to eq(data["id"])
+        expect(blog["name"]).to eq(data["name"])
+      end
+
+      context "when the value is unknown" do
+        it "returns nil" do
+          blog = Hubspot::Blog.new({})
+
+          expect(blog["nope"]).to be_nil
+        end
+      end
     end
 
     describe "#posts" do
@@ -83,8 +94,6 @@ describe Hubspot do
   end
 
   describe Hubspot::BlogPost do
-    cassette "blog_posts"
-
     describe "#created_at" do
       it "returns the created timestamp as a Time" do
         timestamp = timestamp_in_milliseconds(Time.now)
@@ -94,17 +103,39 @@ describe Hubspot do
       end
     end
 
-    it "can find by blog_post_id" do
-      blog = Hubspot::BlogPost.find_by_blog_post_id(422192866)
-      expect(blog['id']).to eq(422192866)
+    describe ".find_by_blog_post_id" do
+      it "retrieves a blog post by id" do
+        VCR.use_cassette "blog_posts" do
+          blog_post_id = 422192866
+
+          result = Hubspot::BlogPost.find_by_blog_post_id(blog_post_id)
+
+          assert_requested :get, hubspot_api_url("/content/api/v2/blog-posts/#{blog_post_id}?hapikey=demo")
+          expect(result).to be_a(Hubspot::BlogPost)
+        end
+      end
     end
 
-    context 'containing a topic' do
-      # 422192866 contains a topic
-      let(:blog_with_topic) { Hubspot::BlogPost.find_by_blog_post_id(422192866) }
+    describe "#topics" do
+      it "returns the list of topics" do
+        VCR.use_cassette "blog_posts" do
+          blog_post = Hubspot::BlogPost.find_by_blog_post_id(422192866)
 
-      it "should return topic objects" do
-        expect(blog_with_topic.topics.first.is_a?(Hubspot::Topic)).to be(true)
+          topics = blog_post.topics
+
+          expect(topics).to be_kind_of(Array)
+          expect(topics.first).to be_a(Hubspot::Topic)
+        end
+      end
+
+      context "when the blog post does not have topics" do
+        it "returns an empty list" do
+          blog_post = Hubspot::BlogPost.new({ "topic_ids" => [] })
+
+          topics = blog_post.topics
+
+          expect(topics).to be_empty
+        end
       end
     end
   end
